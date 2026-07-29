@@ -4,7 +4,7 @@ import { query } from "./database.js";
 
 dayjs.extend(customParseFormat);
 
-const RESERVATION_STATUSES = ["pending", "confirmed", "cancelled", "completed"];
+export const RESERVATION_STATUSES = ["pending", "confirmed", "cancelled", "completed"];
 const DATE_INPUT_FORMATS = ["YYYY-MM-DD", "DD.MM.YYYY", "DD-MM-YYYY"];
 const MIN_GUESTS = 1;
 const MAX_GUESTS = 20;
@@ -106,4 +106,18 @@ export async function createReservation({ userId, date, time, guestsCount, phone
   );
 
   return result.rows[0];
+}
+
+export async function updateReservationStatus(reservationId, status) {
+  const result = await query(
+    `
+    UPDATE reservations
+    SET status = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+    `,
+    [reservationId, status]
+  );
+
+  return result.rows[0] ?? null;
 }

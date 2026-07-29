@@ -111,6 +111,25 @@ export async function getUpcomingReservationsCount() {
   return result.rows[0].count;
 }
 
+export async function getRecentReservations(limit = 10) {
+  const result = await query(
+    `
+    SELECT r.id, r.reservation_date, r.reservation_time, r.guests_count, r.phone_number,
+           r.status, u.first_name, u.username
+    FROM reservations r
+    JOIN users u ON u.id = r.user_id
+    WHERE r.status != 'cancelled'
+      AND (r.reservation_date > CURRENT_DATE
+        OR (r.reservation_date = CURRENT_DATE AND r.reservation_time >= CURRENT_TIME))
+    ORDER BY r.reservation_date ASC, r.reservation_time ASC
+    LIMIT $1;
+    `,
+    [limit]
+  );
+
+  return result.rows;
+}
+
 export function getAddItemSession(chatId) {
   return addItemSessions.get(chatId) ?? null;
 }

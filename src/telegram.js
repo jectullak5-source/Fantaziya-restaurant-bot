@@ -39,6 +39,8 @@ import {
   updateReservationSession,
   endReservationSession,
   createReservation,
+  RESERVATION_STATUSES,
+  updateReservationStatus,
 } from "./reservations.js";
 import { processUserMessage, processVoiceMessage } from "./brain.js";
 import {
@@ -47,6 +49,7 @@ import {
   getOrderStatistics,
   getRecentOrders,
   getUpcomingReservationsCount,
+  getRecentReservations,
   getAddItemSession,
   startAddItemSession,
   updateAddItemSession,
@@ -59,6 +62,13 @@ const ORDER_STATUS_LABELS = {
   preparing: "👨‍🍳 Tayyorlanmoqda",
   delivering: "🚗 Yetkazilmoqda",
   completed: "🏁 Yakunlandi",
+  cancelled: "❌ Bekor qilindi",
+};
+
+const RESERVATION_STATUS_LABELS = {
+  pending: "⏳ Kutilmoqda",
+  confirmed: "✅ Tasdiqlandi",
+  completed: "🏁 Bo'lib o'tdi",
   cancelled: "❌ Bekor qilindi",
 };
 
@@ -687,6 +697,7 @@ function buildAdminMainMenuKeyboard() {
   return {
     inline_keyboard: [
       [{ text: "📦 Buyurtmalar", callback_data: "admin:orders" }],
+      [{ text: "🪑 Bronlar", callback_data: "admin:reservations" }],
       [{ text: "📊 Statistika", callback_data: "admin:stats" }],
       [{ text: "🍽 Menyu boshqaruvi", callback_data: "admin:menuadmin" }],
     ],
@@ -769,6 +780,93 @@ async function applyOrderStatus(chatId, messageId, orderId, status) {
       message_id: messageId,
       reply_markup: {
         inline_keyboard: [[{ text: "⬅️ Buyurtmalarga qaytish", callback_data: "admin:orders" }]],
+      },
+    }
+  );
+}
+
+async function showAdminReservations(chatId, messageId) {
+  const reservations = await getRecentReservations(10);
+
+  if (reservations.length === 0) {
+    await bot.editMessageText("Hozircha kelayotgan bronlar yo'q.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: [[{ text: "⬅️ Orqaga", callback_data: "admin:menu" }]] },
+    });
+    return;
+  }
+
+  const lines = reservations
+    .map((reservation) => {
+      const customer = reservation.first_name || reservation.username || "Noma'lum";
+      const status = RESERVATION_STATUS_LABELS[reservation.status] ?? reservation.status;
+      const date = dayjs(reservation.reservation_date).format("DD.MM.YYYY");
+      const time = reservation.reservation_time.slice(0, 5);
+      return `#${reservation.id} — ${customer} — ${date} ${time} — 👥${reservation.guests_count} — ${status}`;
+    })
+    .join("\n");
+
+  const reservationButtons = reservations.map((reservation) => [
+    {
+      text: `✏️ #${reservation.id} holatini o'zgartirish`,
+      callback_data: `admin:resstatus:${reservation.id}`,
+    },
+  ]);
+
+  await bot.editMessageText(`🪑 *Kelayotgan bronlar:*\n\n${lines}`, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [...reservationButtons, [{ text: "⬅️ Orqaga", callback_data: "admin:menu" }]],
+    },
+  });
+}
+
+async function showReservationStatusOptions(chatId, messageId, reservationId) {
+  const statusButtons = RESERVATION_STATUSES.map((status) => [
+    {
+      text: RESERVATION_STATUS_LABELS[status],
+      callback_data: `admin:setresstatus:${reservationId}:${status}`,
+    },
+  ]);
+
+  await bot.editMessageText(`Bron #${reservationId} uchun yangi holatni tanlang:`, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [
+        ...statusButtons,
+        [{ text: "⬅️ Orqaga", callback_data: "admin:reservations" }],
+      ],
+    },
+  });
+}
+
+async function applyReservationStatus(chatId, messageId, reservationId, status) {
+  const reservation = await updateReservationStatus(reservationId, status);
+
+  if (!reservation) {
+    await bot.editMessageText(`Bron #${reservationId} topilmadi.`, {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [[{ text: "⬅️ Orqaga", callback_data: "admin:reservations" }]],
+      },
+    });
+    return;
+  }
+
+  await bot.editMessageText(
+    `✅ Bron #${reservationId} holati "${RESERVATION_STATUS_LABELS[status]}"ga o'zgartirildi.`,
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "⬅️ Bronlarga qaytish", callback_data: "admin:reservations" }],
+        ],
       },
     }
   );
@@ -1033,6 +1131,12 @@ function registerAdminCallbacks() {
         await showAdminMainMenu(chatId, messageId);
       } else if (action === "orders") {
         await showAdminOrders(chatId, messageId);
+      } else if (action === "reservations") {
+        await showAdminReservations(chatId, messageId);
+      } else if (action === "resstatus") {
+        await showReservationStatusOptions(chatId, messageId, Number(rest[0]));
+      } else if (action === "setresstatus") {
+        await applyReservationStatus(chatId, messageId, Number(rest[0]), rest[1]);
       } else if (action === "stats") {
         await showAdminStats(chatId, messageId);
       } else if (action === "menuadmin") {
