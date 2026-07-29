@@ -74,6 +74,28 @@ function registerUserTracking() {
   });
 }
 
+const MAIN_MENU_BUTTON_TEXTS = {
+  MENU: "🍗 Menyu",
+  CART: "🛒 Savat",
+  BOOK: "🪑 Stol bron qilish",
+  MY_ORDERS: "📦 Buyurtmalarim",
+  ADDRESS: "📍 Manzil",
+  CONTACT: "☎️ Aloqa",
+};
+
+const MAIN_MENU_BUTTON_TEXT_SET = new Set(Object.values(MAIN_MENU_BUTTON_TEXTS));
+
+function buildMainReplyKeyboard() {
+  return {
+    keyboard: [
+      [MAIN_MENU_BUTTON_TEXTS.MENU, MAIN_MENU_BUTTON_TEXTS.CART],
+      [MAIN_MENU_BUTTON_TEXTS.BOOK, MAIN_MENU_BUTTON_TEXTS.MY_ORDERS],
+      [MAIN_MENU_BUTTON_TEXTS.ADDRESS, MAIN_MENU_BUTTON_TEXTS.CONTACT],
+    ],
+    resize_keyboard: true,
+  };
+}
+
 function registerStartCommand() {
   bot.onText(/^\/start$/, async (message) => {
     const chatId = message.chat.id;
@@ -82,14 +104,8 @@ function registerStartCommand() {
     try {
       await bot.sendMessage(
         chatId,
-        `Assalomu alaykum, ${firstName}!\n\n` +
-          "Fantaziya Restaurant botiga xush kelibsiz.\n\n" +
-          "🍗 KFC\n" +
-          "🍢 Shashlik\n" +
-          "🍲 Milliy taomlar\n" +
-          "🥤 Ichimliklar\n" +
-          "🍰 Desertlar\n\n" +
-          "Tez orada menyu va buyurtma xizmati ishga tushadi."
+        `Assalomu alaykum, ${firstName}!\n\nFantaziya Restaurant botiga xush kelibsiz. Quyidagi menyudan foydalaning:`,
+        { reply_markup: buildMainReplyKeyboard() }
       );
     } catch (error) {
       console.error("/start xabarini yuborishda xatolik:", error.message);
@@ -228,27 +244,67 @@ async function showCart(chatId, messageId) {
   });
 }
 
+async function sendMainMenu(chatId) {
+  const categories = await getCategories();
+
+  if (categories.length === 0) {
+    await bot.sendMessage(chatId, "Hozircha menyu kategoriyalari mavjud emas.");
+    return;
+  }
+
+  await bot.sendMessage(chatId, "Kategoriyani tanlang:", {
+    reply_markup: buildCategoriesKeyboard(categories),
+  });
+}
+
 function registerMenuCommand() {
   bot.onText(/^\/menu$/, async (message) => {
     const chatId = message.chat.id;
 
     try {
-      const categories = await getCategories();
-
-      if (categories.length === 0) {
-        await bot.sendMessage(chatId, "Hozircha menyu kategoriyalari mavjud emas.");
-        return;
-      }
-
-      await bot.sendMessage(chatId, "Kategoriyani tanlang:", {
-        reply_markup: buildCategoriesKeyboard(categories),
-      });
+      await sendMainMenu(chatId);
     } catch (error) {
       console.error("/menu buyrug'ida xatolik:", error.message);
       await bot.sendMessage(
         chatId,
         "Menyuni yuklashda xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring."
       );
+    }
+  });
+}
+
+function registerMainMenuButtonsFlow() {
+  bot.on("message", async (message) => {
+    const chatId = message.chat.id;
+    const text = message.text;
+
+    if (!text || !MAIN_MENU_BUTTON_TEXT_SET.has(text)) {
+      return;
+    }
+
+    try {
+      switch (text) {
+        case MAIN_MENU_BUTTON_TEXTS.MENU:
+          await sendMainMenu(chatId);
+          break;
+        case MAIN_MENU_BUTTON_TEXTS.CART:
+          await bot.sendMessage(chatId, "🛒 Savat bo'limi tez orada ishga tushadi.");
+          break;
+        case MAIN_MENU_BUTTON_TEXTS.BOOK:
+          await bot.sendMessage(chatId, "🪑 Stol bron qilish tez orada ishga tushadi.");
+          break;
+        case MAIN_MENU_BUTTON_TEXTS.MY_ORDERS:
+          await bot.sendMessage(chatId, "📦 Buyurtmalaringiz tarixi tez orada ishga tushadi.");
+          break;
+        case MAIN_MENU_BUTTON_TEXTS.ADDRESS:
+          await bot.sendMessage(chatId, "📍 Manzil bo'limi tez orada ishga tushadi.");
+          break;
+        case MAIN_MENU_BUTTON_TEXTS.CONTACT:
+          await bot.sendMessage(chatId, "☎️ Aloqa ma'lumotlari tez orada qo'shiladi.");
+          break;
+      }
+    } catch (error) {
+      console.error("Asosiy menyu tugmasida xatolik:", error.message);
     }
   });
 }
@@ -922,6 +978,10 @@ function registerAiConversationFlow() {
       return;
     }
 
+    if (MAIN_MENU_BUTTON_TEXT_SET.has(text)) {
+      return;
+    }
+
     if (getCheckoutSession(chatId) || getReservationSession(chatId) || getAddItemSession(chatId)) {
       return;
     }
@@ -1139,6 +1199,7 @@ export function startBot() {
   registerUserTracking();
   registerStartCommand();
   registerMenuCommand();
+  registerMainMenuButtonsFlow();
   registerCartCommand();
   registerCheckoutFlow();
   registerBookCommand();
