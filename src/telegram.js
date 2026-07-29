@@ -515,6 +515,11 @@ function registerCheckoutFlow() {
         await handlePhoneStep(chatId, message);
       } else if (session.step === "awaiting_location") {
         await handleLocationStep(chatId, message);
+      } else if (session.step === "confirming") {
+        await bot.sendMessage(
+          chatId,
+          "Iltimos, yuqoridagi ✅ Tasdiqlash yoki ❌ Bekor qilish tugmasidan birini tanlang."
+        );
       }
     } catch (error) {
       console.error("Checkout jarayonida xatolik:", error.message);
@@ -665,6 +670,11 @@ function registerReservationFlow() {
         await handleReservationGuestsStep(chatId, message.text ?? "");
       } else if (session.step === "awaiting_phone") {
         await handleReservationPhoneStep(chatId, message);
+      } else if (session.step === "confirming") {
+        await bot.sendMessage(
+          chatId,
+          "Iltimos, yuqoridagi ✅ Tasdiqlash yoki ❌ Bekor qilish tugmasidan birini tanlang."
+        );
       }
     } catch (error) {
       console.error("Bron jarayonida xatolik:", error.message);
@@ -980,7 +990,9 @@ function registerAdminMenuFlow() {
     }
 
     try {
-      if (session.step === "awaiting_name") {
+      if (session.step === "awaiting_category") {
+        await bot.sendMessage(chatId, "Iltimos, yuqoridagi kategoriya tugmalaridan birini tanlang.");
+      } else if (session.step === "awaiting_name") {
         await handleAdminAddItemName(chatId, message.text ?? "");
       } else if (session.step === "awaiting_price") {
         await handleAdminAddItemPrice(chatId, message.text ?? "");
