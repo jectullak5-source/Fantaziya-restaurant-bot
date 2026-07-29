@@ -160,3 +160,18 @@ export async function updateOrderStatus(orderId, status) {
 
   return result.rows[0] ?? null;
 }
+
+export async function getOrdersByUserId(userId, limit = 10) {
+  const result = await query(
+    `
+    SELECT id, status, total_price, created_at
+    FROM orders
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT $2;
+    `,
+    [userId, limit]
+  );
+
+  return result.rows;
+}

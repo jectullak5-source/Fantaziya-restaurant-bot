@@ -1,5 +1,6 @@
 import TelegramBot from "node-telegram-bot-api";
 import axios from "axios";
+import dayjs from "dayjs";
 import { config } from "./config.js";
 import { upsertUser } from "./database.js";
 import {
@@ -26,6 +27,7 @@ import {
   createOrder,
   ORDER_STATUSES,
   updateOrderStatus,
+  getOrdersByUserId,
 } from "./orders.js";
 import {
   parseReservationDate,
@@ -300,13 +302,13 @@ function registerMainMenuButtonsFlow() {
           await sendMainMenu(chatId);
           break;
         case MAIN_MENU_BUTTON_TEXTS.CART:
-          await bot.sendMessage(chatId, "🛒 Savat bo'limi tez orada ishga tushadi.");
+          await sendCartView(chatId);
           break;
         case MAIN_MENU_BUTTON_TEXTS.BOOK:
           await sendBookingPrompt(chatId);
           break;
         case MAIN_MENU_BUTTON_TEXTS.MY_ORDERS:
-          await bot.sendMessage(chatId, "📦 Buyurtmalaringiz tarixi tez orada ishga tushadi.");
+          await sendMyOrders(chatId, message.from);
           break;
         case MAIN_MENU_BUTTON_TEXTS.ADDRESS:
           await bot.sendMessage(
@@ -337,23 +339,47 @@ function registerMainMenuButtonsFlow() {
   });
 }
 
+async function sendCartView(chatId) {
+  const cartLines = getCart(chatId);
+  const total = getCartTotal(chatId);
+
+  const reply_markup =
+    cartLines.length > 0
+      ? buildCartKeyboard(cartLines)
+      : { inline_keyboard: [[{ text: "🍽 Menyuni ko'rish", callback_data: "menu" }]] };
+
+  await bot.sendMessage(chatId, formatCartText(cartLines, total), {
+    parse_mode: "Markdown",
+    reply_markup,
+  });
+}
+
+async function sendMyOrders(chatId, telegramFrom) {
+  const user = await upsertUser(telegramFrom);
+  const orders = await getOrdersByUserId(user.id, 10);
+
+  if (orders.length === 0) {
+    await bot.sendMessage(chatId, "📦 Sizda hali buyurtmalar yo'q.");
+    return;
+  }
+
+  const lines = orders
+    .map((order) => {
+      const status = ORDER_STATUS_LABELS[order.status] ?? order.status;
+      const date = dayjs(order.created_at).format("DD.MM.YYYY HH:mm");
+      return `#${order.id} — ${date} — ${status} — ${formatPrice(order.total_price)}`;
+    })
+    .join("\n");
+
+  await bot.sendMessage(chatId, `📦 *Sizning buyurtmalaringiz:*\n\n${lines}`, {
+    parse_mode: "Markdown",
+  });
+}
+
 function registerCartCommand() {
   bot.onText(/^\/cart$/, async (message) => {
-    const chatId = message.chat.id;
-
     try {
-      const cartLines = getCart(chatId);
-      const total = getCartTotal(chatId);
-
-      const reply_markup =
-        cartLines.length > 0
-          ? buildCartKeyboard(cartLines)
-          : { inline_keyboard: [[{ text: "🍽 Menyuni ko'rish", callback_data: "menu" }]] };
-
-      await bot.sendMessage(chatId, formatCartText(cartLines, total), {
-        parse_mode: "Markdown",
-        reply_markup,
-      });
+      await sendCartView(message.chat.id);
     } catch (error) {
       console.error("/cart buyrug'ida xatolik:", error.message);
     }
