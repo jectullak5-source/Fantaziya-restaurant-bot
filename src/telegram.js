@@ -85,6 +85,18 @@ const MAIN_MENU_BUTTON_TEXTS = {
 
 const MAIN_MENU_BUTTON_TEXT_SET = new Set(Object.values(MAIN_MENU_BUTTON_TEXTS));
 
+const RESTAURANT_CONTACT = {
+  phone: "+998 93 124 17 11",
+  workingHours: "09:00 – 22:00 (har kuni)",
+  instagramHandle: "@fantaziya_madaniyat",
+  instagramUrl: "https://instagram.com/fantaziya_madaniyat",
+};
+
+const RESTAURANT_ADDRESS = {
+  text: "Andijon viloyati, Pahtaobod tumani, Madaniyat qishlog'i, Fantaziya",
+  mapsUrl: "https://maps.app.goo.gl/qN4rYxeo3KgRowsq9?g_st=ic",
+};
+
 function buildMainReplyKeyboard() {
   return {
     keyboard: [
@@ -291,16 +303,32 @@ function registerMainMenuButtonsFlow() {
           await bot.sendMessage(chatId, "🛒 Savat bo'limi tez orada ishga tushadi.");
           break;
         case MAIN_MENU_BUTTON_TEXTS.BOOK:
-          await bot.sendMessage(chatId, "🪑 Stol bron qilish tez orada ishga tushadi.");
+          await sendBookingPrompt(chatId);
           break;
         case MAIN_MENU_BUTTON_TEXTS.MY_ORDERS:
           await bot.sendMessage(chatId, "📦 Buyurtmalaringiz tarixi tez orada ishga tushadi.");
           break;
         case MAIN_MENU_BUTTON_TEXTS.ADDRESS:
-          await bot.sendMessage(chatId, "📍 Manzil bo'limi tez orada ishga tushadi.");
+          await bot.sendMessage(
+            chatId,
+            `📍 *Manzilimiz:*\n\n${RESTAURANT_ADDRESS.text}`,
+            {
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [[{ text: "🗺 Xaritada ochish", url: RESTAURANT_ADDRESS.mapsUrl }]],
+              },
+            }
+          );
           break;
         case MAIN_MENU_BUTTON_TEXTS.CONTACT:
-          await bot.sendMessage(chatId, "☎️ Aloqa ma'lumotlari tez orada qo'shiladi.");
+          await bot.sendMessage(
+            chatId,
+            `☎️ *Aloqa:*\n\n` +
+              `📞 Telefon: ${RESTAURANT_CONTACT.phone}\n` +
+              `🕐 Ish vaqti: ${RESTAURANT_CONTACT.workingHours}\n` +
+              `📷 Instagram: [${RESTAURANT_CONTACT.instagramHandle}](${RESTAURANT_CONTACT.instagramUrl})`,
+            { parse_mode: "Markdown" }
+          );
           break;
       }
     } catch (error) {
@@ -444,26 +472,28 @@ function registerCheckoutFlow() {
   });
 }
 
+async function sendBookingPrompt(chatId) {
+  startReservationSession(chatId);
+
+  await bot.sendMessage(
+    chatId,
+    "📅 Qaysi kunga stol band qilmoqchisiz? (masalan: bugun, ertaga, 05.08.2026)",
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Bugun", callback_data: "book_date:bugun" },
+            { text: "Ertaga", callback_data: "book_date:ertaga" },
+          ],
+        ],
+      },
+    }
+  );
+}
+
 function registerBookCommand() {
   bot.onText(/^\/book$/, async (message) => {
-    const chatId = message.chat.id;
-
-    startReservationSession(chatId);
-
-    await bot.sendMessage(
-      chatId,
-      "📅 Qaysi kunga stol band qilmoqchisiz? (masalan: bugun, ertaga, 05.08.2026)",
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "Bugun", callback_data: "book_date:bugun" },
-              { text: "Ertaga", callback_data: "book_date:ertaga" },
-            ],
-          ],
-        },
-      }
-    );
+    await sendBookingPrompt(message.chat.id);
   });
 }
 
