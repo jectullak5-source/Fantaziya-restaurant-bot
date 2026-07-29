@@ -99,6 +99,34 @@ const RESTAURANT_ADDRESS = {
   mapsUrl: "https://maps.app.goo.gl/qN4rYxeo3KgRowsq9?g_st=ic",
 };
 
+async function notifyOrdersGroup(text) {
+  if (!config.ordersGroupChatId) {
+    return;
+  }
+
+  try {
+    await bot.sendMessage(config.ordersGroupChatId, text, { parse_mode: "Markdown" });
+  } catch (error) {
+    console.error("Guruhga bildirishnoma yuborishda xatolik:", error.message);
+  }
+}
+
+function registerGroupIdCommand() {
+  bot.onText(/^\/group_id$/, async (message) => {
+    const chatId = message.chat.id;
+
+    try {
+      if (!(await isAdmin(message.from.id))) {
+        return;
+      }
+
+      await bot.sendMessage(chatId, `Ushbu chat ID: \`${chatId}\``, { parse_mode: "Markdown" });
+    } catch (error) {
+      console.error("/group_id buyrug'ida xatolik:", error.message);
+    }
+  });
+}
+
 function buildMainReplyKeyboard() {
   return {
     keyboard: [
@@ -1181,6 +1209,22 @@ function registerMenuCallbacks() {
           )}\n\nTez orada operatorlarimiz siz bilan bog'lanadi.`,
           { chat_id: chatId, message_id: messageId }
         );
+
+        const customerName = user.first_name || user.username || "Noma'lum";
+        const addressLine = session.addressText ?? `${session.latitude}, ${session.longitude}`;
+        const itemsLines = cartLines
+          .map((line) => `  • ${line.name} x${line.quantity}`)
+          .join("\n");
+
+        await notifyOrdersGroup(
+          `🆕 *Yangi buyurtma!*\n\n` +
+            `#${order.id}\n` +
+            `👤 ${customerName}\n` +
+            `📞 ${session.phoneNumber}\n` +
+            `📍 ${addressLine}\n\n` +
+            `${itemsLines}\n\n` +
+            `💰 Jami: ${formatPrice(order.total_price)}`
+        );
       } else if (data === "cancel_order") {
         endCheckout(chatId);
         await bot.answerCallbackQuery(callbackQuery.id);
@@ -1224,6 +1268,17 @@ function registerMenuCallbacks() {
             `Sizni kutamiz!`,
           { chat_id: chatId, message_id: messageId }
         );
+
+        const reservationCustomerName = user.first_name || user.username || "Noma'lum";
+
+        await notifyOrdersGroup(
+          `🆕 *Yangi bron!*\n\n` +
+            `#${reservation.id}\n` +
+            `👤 ${reservationCustomerName}\n` +
+            `📞 ${session.phoneNumber}\n` +
+            `📅 ${session.date} 🕐 ${session.time}\n` +
+            `👥 ${session.guestsCount} kishi`
+        );
       } else if (data === "cancel_reservation") {
         endReservationSession(chatId);
         await bot.answerCallbackQuery(callbackQuery.id);
@@ -1261,6 +1316,7 @@ export function startBot() {
   registerBookCommand();
   registerReservationFlow();
   registerAdminCommand();
+  registerGroupIdCommand();
   registerAddAdminCommand();
   registerAdminMenuFlow();
   registerAiConversationFlow();

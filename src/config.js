@@ -18,6 +18,9 @@ export const config = {
     .map((id) => id.trim())
     .filter(Boolean)
     .map(Number),
+  ordersGroupChatId: process.env.ORDERS_GROUP_CHAT_ID
+    ? Number(process.env.ORDERS_GROUP_CHAT_ID)
+    : null,
   port: Number(process.env.PORT) || 3000,
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
