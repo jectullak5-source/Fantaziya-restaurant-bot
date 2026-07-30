@@ -111,13 +111,18 @@ const RESTAURANT_ADDRESS = {
 
 async function notifyOrdersGroup(text) {
   if (!config.ordersGroupChatId) {
+    console.log("Guruh bildirishnomasi o'tkazib yuborildi: ORDERS_GROUP_CHAT_ID sozlanmagan.");
     return;
   }
 
   try {
     await bot.sendMessage(config.ordersGroupChatId, text, { parse_mode: "Markdown" });
+    console.log(`Guruhga bildirishnoma yuborildi (chat_id: ${config.ordersGroupChatId}).`);
   } catch (error) {
-    console.error("Guruhga bildirishnoma yuborishda xatolik:", error.message);
+    console.error(
+      `Guruhga bildirishnoma yuborishda xatolik (chat_id: ${config.ordersGroupChatId}):`,
+      error.message
+    );
   }
 }
 

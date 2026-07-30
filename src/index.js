@@ -26,6 +26,12 @@ async function bootstrap() {
 
   startBot();
 
+  console.log(
+    config.ordersGroupChatId
+      ? `Guruh bildirishnomasi YOQILGAN. Chat ID: ${config.ordersGroupChatId}`
+      : "Guruh bildirishnomasi O'CHIRILGAN (ORDERS_GROUP_CHAT_ID sozlanmagan)."
+  );
+
   console.log("Fantaziya Restaurant bot muvaffaqiyatli ishga tushdi.");
 }
 
