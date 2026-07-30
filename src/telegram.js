@@ -34,6 +34,7 @@ import {
   ORDER_STATUSES,
   updateOrderStatus,
   getOrdersByUserId,
+  archiveOrder,
 } from "./orders.js";
 import {
   parseReservationDate,
@@ -58,6 +59,7 @@ import {
   createReservation,
   RESERVATION_STATUSES,
   updateReservationStatus,
+  archiveReservation,
   WEEKDAY_NAMES,
   getAddTableSession,
   startAddTableSession,
@@ -315,16 +317,42 @@ async function showCategoryItems(chatId, messageId, categoryId) {
     return;
   }
 
-  const itemsText = items
-    .map((item) => `🍽 ${item.name} — ${formatPrice(item.price)}`)
-    .join("\n");
+  const itemsWithoutPhoto = items.filter((item) => !item.image_url);
+  const itemsWithPhoto = items.filter((item) => item.image_url);
 
-  await bot.editMessageText(`*${category.name}*\n\n${itemsText}`, {
-    chat_id: chatId,
-    message_id: messageId,
-    parse_mode: "Markdown",
-    reply_markup: buildItemsKeyboard(items),
-  });
+  if (itemsWithoutPhoto.length > 0) {
+    const itemsText = itemsWithoutPhoto
+      .map((item) => `🍽 ${sanitizeForMarkdown(item.name)} — ${formatPrice(item.price)}`)
+      .join("\n");
+
+    await bot.editMessageText(`*${category.name}*\n\n${itemsText}`, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      reply_markup: buildItemsKeyboard(itemsWithoutPhoto),
+    });
+  } else {
+    await bot.editMessageText(`*${category.name}*\n\nRasmli taomlar quyida:`, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      reply_markup: buildBackToCategoriesKeyboard(),
+    });
+  }
+
+  for (const item of itemsWithPhoto) {
+    const caption =
+      `🍽 *${sanitizeForMarkdown(item.name)}* — ${formatPrice(item.price)}` +
+      (item.description ? `\n${sanitizeForMarkdown(item.description)}` : "");
+
+    await bot.sendPhoto(chatId, item.image_url, {
+      caption,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "➕ Savatga qo'shish", callback_data: `add:${item.id}` }]],
+      },
+    });
+  }
 }
 
 async function showCart(chatId, messageId) {
@@ -869,9 +897,19 @@ async function showAdminOrders(chatId, messageId) {
     })
     .join("\n");
 
-  const orderButtons = orders.map((order) => [
-    { text: `✏️ #${order.id} holatini o'zgartirish`, callback_data: `admin:orderstatus:${order.id}` },
-  ]);
+  const orderButtons = orders.flatMap((order) => {
+    const rows = [
+      [{ text: `✏️ #${order.id} holatini o'zgartirish`, callback_data: `admin:orderstatus:${order.id}` }],
+    ];
+
+    if (order.status === "completed") {
+      rows.push([
+        { text: `🗑 #${order.id} ro'yxatdan olib tashlash`, callback_data: `admin:archiveorder:${order.id}` },
+      ]);
+    }
+
+    return rows;
+  });
 
   await bot.editMessageText(`📦 *So'nggi buyurtmalar:*\n\n${lines}`, {
     chat_id: chatId,
@@ -921,6 +959,11 @@ async function applyOrderStatus(chatId, messageId, orderId, status) {
   );
 }
 
+async function archiveAdminOrder(chatId, messageId, orderId) {
+  await archiveOrder(orderId);
+  await showAdminOrders(chatId, messageId);
+}
+
 async function showAdminReservations(chatId, messageId) {
   const reservations = await getRecentReservations(10);
 
@@ -945,12 +988,27 @@ async function showAdminReservations(chatId, messageId) {
     })
     .join("\n");
 
-  const reservationButtons = reservations.map((reservation) => [
-    {
-      text: `✏️ #${reservation.id} holatini o'zgartirish`,
-      callback_data: `admin:resstatus:${reservation.id}`,
-    },
-  ]);
+  const reservationButtons = reservations.flatMap((reservation) => {
+    const rows = [
+      [
+        {
+          text: `✏️ #${reservation.id} holatini o'zgartirish`,
+          callback_data: `admin:resstatus:${reservation.id}`,
+        },
+      ],
+    ];
+
+    if (reservation.status === "completed") {
+      rows.push([
+        {
+          text: `🗑 #${reservation.id} ro'yxatdan olib tashlash`,
+          callback_data: `admin:archiveres:${reservation.id}`,
+        },
+      ]);
+    }
+
+    return rows;
+  });
 
   await bot.editMessageText(`🪑 *Kelayotgan bronlar:*\n\n${lines}`, {
     chat_id: chatId,
@@ -1008,6 +1066,11 @@ async function applyReservationStatus(chatId, messageId, reservationId, status) 
       },
     }
   );
+}
+
+async function archiveAdminReservation(chatId, messageId, reservationId) {
+  await archiveReservation(reservationId);
+  await showAdminReservations(chatId, messageId);
 }
 
 async function showAdminSchedule(chatId, messageId) {
@@ -1329,14 +1392,29 @@ async function handleAdminAddItemPrice(chatId, text) {
 }
 
 async function handleAdminAddItemDescription(chatId, text) {
-  const session = getAddItemSession(chatId);
   const description = text.trim() === "-" ? null : text.trim();
+
+  updateAddItemSession(chatId, { description, step: "awaiting_photo" });
+  await bot.sendMessage(chatId, "Taom rasmini yuboring (yoki rasm bo'lmasa '-' deb yozing):");
+}
+
+async function handleAdminAddItemPhoto(chatId, message) {
+  const session = getAddItemSession(chatId);
+  let imageFileId = null;
+
+  if (message.photo && message.photo.length > 0) {
+    imageFileId = message.photo[message.photo.length - 1].file_id;
+  } else if (message.text?.trim() !== "-") {
+    await bot.sendMessage(chatId, "Iltimos, rasm yuboring yoki rasm bo'lmasa '-' deb yozing.");
+    return;
+  }
 
   const item = await createMenuItem({
     categoryId: session.categoryId,
     name: session.name,
     price: session.price,
-    description,
+    description: session.description,
+    imageFileId,
   });
 
   endAddItemSession(chatId);
@@ -1421,6 +1499,8 @@ function registerAdminMenuFlow() {
         await handleAdminAddItemPrice(chatId, message.text ?? "");
       } else if (session.step === "awaiting_description") {
         await handleAdminAddItemDescription(chatId, message.text ?? "");
+      } else if (session.step === "awaiting_photo") {
+        await handleAdminAddItemPhoto(chatId, message);
       }
     } catch (error) {
       console.error("Admin taom qo'shishda xatolik:", error.message);
@@ -1506,6 +1586,10 @@ function registerAdminCallbacks() {
         await showReservationStatusOptions(chatId, messageId, Number(rest[0]));
       } else if (action === "setresstatus") {
         await applyReservationStatus(chatId, messageId, Number(rest[0]), rest[1]);
+      } else if (action === "archiveorder") {
+        await archiveAdminOrder(chatId, messageId, Number(rest[0]));
+      } else if (action === "archiveres") {
+        await archiveAdminReservation(chatId, messageId, Number(rest[0]));
       } else if (action === "stats") {
         await showAdminStats(chatId, messageId);
       } else if (action === "menuadmin") {

@@ -23,6 +23,8 @@ Muhim qoidalar:
   o'zing yakunlay olmaysan. Savat to'lgandan keyin foydalanuvchiga "/cart buyrug'ini yuboring va
   '✅ Buyurtma berish' tugmasini bosing" deb ayt.
 - Menyuda yo'q taom haqida so'ralsa, buni aniq ayt, o'ylab topma.
+- Foydalanuvchilar "buyurtma" o'rniga ko'pincha "zakaz" so'zini ishlatishadi (masalan "zakaz bermoqchiman",
+  "zakazim qayerda") — bu xuddi "buyurtma" bilan bir xil ma'noni anglatadi, shunga mos javob ber.
 `.trim();
 
 function getHistory(chatId) {

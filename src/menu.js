@@ -153,14 +153,14 @@ export async function getAllItemsByCategoryIdForAdmin(categoryId) {
   return result.rows;
 }
 
-export async function createMenuItem({ categoryId, name, price, description }) {
+export async function createMenuItem({ categoryId, name, price, description, imageFileId }) {
   const result = await query(
     `
-    INSERT INTO menu_items (category_id, name, price, description)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO menu_items (category_id, name, price, description, image_url)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *;
     `,
-    [categoryId, name, price, description ?? null]
+    [categoryId, name, price, description ?? null, imageFileId ?? null]
   );
 
   return result.rows[0];

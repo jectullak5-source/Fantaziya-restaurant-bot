@@ -80,11 +80,19 @@ async function addTableIdToReservations() {
   `);
 }
 
+async function addArchivedFlagToReservations() {
+  await query(`
+    ALTER TABLE reservations
+    ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+}
+
 export async function initReservationTables() {
   await createReservationsTable();
   await createTablesTable();
   await createRestaurantSettingsTable();
   await addTableIdToReservations();
+  await addArchivedFlagToReservations();
 
   console.log("Bron qilish, stollar va ish vaqti jadvallari tayyor.");
 }
@@ -276,6 +284,10 @@ export async function updateReservationStatus(reservationId, status) {
   );
 
   return result.rows[0] ?? null;
+}
+
+export async function archiveReservation(reservationId) {
+  await query("UPDATE reservations SET is_archived = TRUE WHERE id = $1;", [reservationId]);
 }
 
 export function getAddTableSession(chatId) {

@@ -90,6 +90,7 @@ export async function getRecentOrders(limit = 10) {
            u.first_name, u.username
     FROM orders o
     JOIN users u ON u.id = o.user_id
+    WHERE o.is_archived = FALSE
     ORDER BY o.created_at DESC
     LIMIT $1;
     `,
@@ -119,6 +120,7 @@ export async function getRecentReservations(limit = 10) {
     FROM reservations r
     JOIN users u ON u.id = r.user_id
     WHERE r.status != 'cancelled'
+      AND r.is_archived = FALSE
       AND (r.reservation_date > CURRENT_DATE
         OR (r.reservation_date = CURRENT_DATE AND r.reservation_time >= CURRENT_TIME))
     ORDER BY r.reservation_date ASC, r.reservation_time ASC

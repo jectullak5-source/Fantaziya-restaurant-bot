@@ -45,9 +45,17 @@ async function createOrderItemsTable() {
   `);
 }
 
+async function addArchivedFlagToOrders() {
+  await query(`
+    ALTER TABLE orders
+    ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+}
+
 export async function initOrderTables() {
   await createOrdersTable();
   await createOrderItemsTable();
+  await addArchivedFlagToOrders();
 
   console.log("Buyurtma jadvallari tayyor.");
 }
@@ -159,6 +167,10 @@ export async function updateOrderStatus(orderId, status) {
   );
 
   return result.rows[0] ?? null;
+}
+
+export async function archiveOrder(orderId) {
+  await query("UPDATE orders SET is_archived = TRUE WHERE id = $1;", [orderId]);
 }
 
 export async function getOrdersByUserId(userId, limit = 10) {
