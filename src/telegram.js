@@ -2,7 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import axios from "axios";
 import dayjs from "dayjs";
 import { config } from "./config.js";
-import { upsertUser } from "./database.js";
+import { upsertUser, getUserScriptPreference, setUserScriptPreference } from "./database.js";
 import {
   getCategories,
   getCategoryById,
@@ -19,6 +19,7 @@ import {
   normalizePhoneNumber,
   buildGoogleMapsLink,
   sanitizeForMarkdown,
+  transliterateToCyrillic,
 } from "./utils.js";
 import {
   getCart,
@@ -118,6 +119,87 @@ bot.processUpdate = (update) => {
   return originalProcessUpdate(update);
 };
 
+async function resolveScript(chatId) {
+  const script = await getUserScriptPreference(chatId);
+  return script ?? "latin";
+}
+
+function localizeReplyMarkup(replyMarkup) {
+  if (!replyMarkup) {
+    return replyMarkup;
+  }
+
+  if (replyMarkup.inline_keyboard) {
+    return {
+      ...replyMarkup,
+      inline_keyboard: replyMarkup.inline_keyboard.map((row) =>
+        row.map((button) =>
+          button.text ? { ...button, text: transliterateToCyrillic(button.text) } : button
+        )
+      ),
+    };
+  }
+
+  if (replyMarkup.keyboard) {
+    return {
+      ...replyMarkup,
+      keyboard: replyMarkup.keyboard.map((row) =>
+        row.map((button) =>
+          typeof button === "string"
+            ? transliterateToCyrillic(button)
+            : { ...button, text: transliterateToCyrillic(button.text) }
+        )
+      ),
+    };
+  }
+
+  return replyMarkup;
+}
+
+const originalSendMessage = bot.sendMessage.bind(bot);
+const originalEditMessageText = bot.editMessageText.bind(bot);
+const originalSendPhoto = bot.sendPhoto.bind(bot);
+
+bot.sendMessage = async (chatId, text, options = {}) => {
+  const script = await resolveScript(chatId);
+
+  if (script !== "cyrillic") {
+    return originalSendMessage(chatId, text, options);
+  }
+
+  return originalSendMessage(chatId, transliterateToCyrillic(text), {
+    ...options,
+    reply_markup: localizeReplyMarkup(options.reply_markup),
+  });
+};
+
+bot.editMessageText = async (text, options = {}) => {
+  const script = await resolveScript(options.chat_id);
+
+  if (script !== "cyrillic") {
+    return originalEditMessageText(text, options);
+  }
+
+  return originalEditMessageText(transliterateToCyrillic(text), {
+    ...options,
+    reply_markup: localizeReplyMarkup(options.reply_markup),
+  });
+};
+
+bot.sendPhoto = async (chatId, photo, options = {}) => {
+  const script = await resolveScript(chatId);
+
+  if (script !== "cyrillic") {
+    return originalSendPhoto(chatId, photo, options);
+  }
+
+  return originalSendPhoto(chatId, photo, {
+    ...options,
+    caption: options.caption ? transliterateToCyrillic(options.caption) : options.caption,
+    reply_markup: localizeReplyMarkup(options.reply_markup),
+  });
+};
+
 function registerUserTracking() {
   bot.on("message", async (message) => {
     try {
@@ -137,7 +219,11 @@ const MAIN_MENU_BUTTON_TEXTS = {
   CONTACT: "☎️ Aloqa",
 };
 
-const MAIN_MENU_BUTTON_TEXT_SET = new Set(Object.values(MAIN_MENU_BUTTON_TEXTS));
+const MAIN_MENU_BUTTON_ACTION_BY_TEXT = new Map();
+for (const [action, latinText] of Object.entries(MAIN_MENU_BUTTON_TEXTS)) {
+  MAIN_MENU_BUTTON_ACTION_BY_TEXT.set(latinText, action);
+  MAIN_MENU_BUTTON_ACTION_BY_TEXT.set(transliterateToCyrillic(latinText), action);
+}
 
 const RESTAURANT_CONTACT = {
   phone: "+998 93 124 17 11",
@@ -198,19 +284,53 @@ function buildMainReplyKeyboard() {
   };
 }
 
+async function sendLanguageSelectionPrompt(chatId) {
+  await originalSendMessage(chatId, "Tilni tanlang / Тилни танланг:", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🇺🇿 Lotin", callback_data: "setlang:latin" },
+          { text: "🇺🇿 Кирилл", callback_data: "setlang:cyrillic" },
+        ],
+      ],
+    },
+  });
+}
+
+async function sendWelcomeMessage(chatId, firstName) {
+  await bot.sendMessage(
+    chatId,
+    `Assalomu alaykum, ${firstName}!\n\nFantaziya Restaurant botiga xush kelibsiz. Quyidagi menyudan foydalaning:`,
+    { reply_markup: buildMainReplyKeyboard() }
+  );
+}
+
 function registerStartCommand() {
   bot.onText(/^\/start$/, async (message) => {
     const chatId = message.chat.id;
     const firstName = message.from?.first_name || "Mehmon";
 
     try {
-      await bot.sendMessage(
-        chatId,
-        `Assalomu alaykum, ${firstName}!\n\nFantaziya Restaurant botiga xush kelibsiz. Quyidagi menyudan foydalaning:`,
-        { reply_markup: buildMainReplyKeyboard() }
-      );
+      const scriptPref = await getUserScriptPreference(chatId);
+
+      if (!scriptPref) {
+        await sendLanguageSelectionPrompt(chatId);
+        return;
+      }
+
+      await sendWelcomeMessage(chatId, firstName);
     } catch (error) {
       console.error("/start xabarini yuborishda xatolik:", error.message);
+    }
+  });
+}
+
+function registerLanguageCommand() {
+  bot.onText(/^\/til$/, async (message) => {
+    try {
+      await sendLanguageSelectionPrompt(message.chat.id);
+    } catch (error) {
+      console.error("/til buyrug'ida xatolik:", error.message);
     }
   });
 }
@@ -406,25 +526,27 @@ function registerMainMenuButtonsFlow() {
     const chatId = message.chat.id;
     const text = message.text;
 
-    if (!text || !MAIN_MENU_BUTTON_TEXT_SET.has(text)) {
+    const action = text ? MAIN_MENU_BUTTON_ACTION_BY_TEXT.get(text) : undefined;
+
+    if (!action) {
       return;
     }
 
     try {
-      switch (text) {
-        case MAIN_MENU_BUTTON_TEXTS.MENU:
+      switch (action) {
+        case "MENU":
           await sendMainMenu(chatId);
           break;
-        case MAIN_MENU_BUTTON_TEXTS.CART:
+        case "CART":
           await sendCartView(chatId);
           break;
-        case MAIN_MENU_BUTTON_TEXTS.BOOK:
+        case "BOOK":
           await sendBookingPrompt(chatId);
           break;
-        case MAIN_MENU_BUTTON_TEXTS.MY_ORDERS:
+        case "MY_ORDERS":
           await sendMyOrders(chatId, message.from);
           break;
-        case MAIN_MENU_BUTTON_TEXTS.ADDRESS:
+        case "ADDRESS":
           await bot.sendMessage(
             chatId,
             `📍 *Manzilimiz:*\n\n${RESTAURANT_ADDRESS.text}`,
@@ -436,7 +558,7 @@ function registerMainMenuButtonsFlow() {
             }
           );
           break;
-        case MAIN_MENU_BUTTON_TEXTS.CONTACT:
+        case "CONTACT":
           await bot.sendMessage(
             chatId,
             `☎️ *Aloqa:*\n\n` +
@@ -1647,7 +1769,7 @@ function registerAiConversationFlow() {
       return;
     }
 
-    if (MAIN_MENU_BUTTON_TEXT_SET.has(text)) {
+    if (MAIN_MENU_BUTTON_ACTION_BY_TEXT.has(text)) {
       return;
     }
 
@@ -1726,7 +1848,13 @@ function registerMenuCallbacks() {
     const messageId = callbackQuery.message.message_id;
 
     try {
-      if (data === "menu") {
+      if (data.startsWith("setlang:")) {
+        const scriptPref = data.split(":")[1];
+        await setUserScriptPreference(callbackQuery.from.id, scriptPref);
+        await bot.answerCallbackQuery(callbackQuery.id);
+        const firstName = callbackQuery.from?.first_name || "Mehmon";
+        await sendWelcomeMessage(chatId, firstName);
+      } else if (data === "menu") {
         await showCategories(chatId, messageId);
         await bot.answerCallbackQuery(callbackQuery.id);
       } else if (data.startsWith("cat:")) {
@@ -1934,6 +2062,7 @@ function registerErrorHandlers() {
 export function startBot() {
   registerUserTracking();
   registerStartCommand();
+  registerLanguageCommand();
   registerMenuCommand();
   registerMainMenuButtonsFlow();
   registerCartCommand();

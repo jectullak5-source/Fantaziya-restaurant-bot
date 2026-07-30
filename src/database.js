@@ -47,6 +47,13 @@ async function createUsersTable() {
   `);
 }
 
+async function addScriptPrefToUsers() {
+  await query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS script_pref VARCHAR(10);
+  `);
+}
+
 export async function initDatabase() {
   const client = await pool.connect();
 
@@ -58,6 +65,7 @@ export async function initDatabase() {
   }
 
   await createUsersTable();
+  await addScriptPrefToUsers();
   console.log("Baza jadvallari tayyor.");
 }
 
@@ -81,4 +89,19 @@ export async function upsertUser(telegramUser) {
   );
 
   return result.rows[0];
+}
+
+export async function getUserScriptPreference(telegramId) {
+  const result = await query("SELECT script_pref FROM users WHERE telegram_id = $1;", [
+    telegramId,
+  ]);
+
+  return result.rows[0]?.script_pref ?? null;
+}
+
+export async function setUserScriptPreference(telegramId, scriptPref) {
+  await query("UPDATE users SET script_pref = $2, updated_at = NOW() WHERE telegram_id = $1;", [
+    telegramId,
+    scriptPref,
+  ]);
 }
