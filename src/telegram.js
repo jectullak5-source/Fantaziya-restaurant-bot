@@ -101,6 +101,21 @@ export const bot = new TelegramBot(config.telegramBotToken, {
   polling: true,
 });
 
+const originalProcessUpdate = bot.processUpdate.bind(bot);
+
+bot.processUpdate = (update) => {
+  const message = update.message;
+  const isFromOrdersGroup =
+    message && config.ordersGroupChatId && message.chat.id === config.ordersGroupChatId;
+  const isGroupIdCommand = message?.text?.trim() === "/group_id";
+
+  if (isFromOrdersGroup && !isGroupIdCommand) {
+    return;
+  }
+
+  return originalProcessUpdate(update);
+};
+
 function registerUserTracking() {
   bot.on("message", async (message) => {
     try {
