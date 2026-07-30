@@ -13,7 +13,7 @@ import {
   setMenuItemAvailability,
   deleteMenuItem,
 } from "./menu.js";
-import { formatPrice, PHONE_REGEX, normalizePhoneNumber } from "./utils.js";
+import { formatPrice, PHONE_REGEX, normalizePhoneNumber, buildGoogleMapsLink } from "./utils.js";
 import {
   getCart,
   addItemToCart,
@@ -465,7 +465,8 @@ async function handlePhoneStep(chatId, message) {
 function formatCheckoutAddressLine(session) {
   if (session.latitude && session.longitude) {
     const note = session.addressText ? ` — ${session.addressText}` : "";
-    return `${session.latitude}, ${session.longitude}${note}`;
+    const mapsLink = buildGoogleMapsLink(session.latitude, session.longitude);
+    return `[🗺 Google Maps'da ko'rish](${mapsLink})${note}`;
   }
 
   return session.addressText ?? "Noma'lum";
@@ -1369,7 +1370,7 @@ function registerMenuCallbacks() {
         );
 
         const customerName = user.first_name || user.username || "Noma'lum";
-        const addressLine = session.addressText ?? `${session.latitude}, ${session.longitude}`;
+        const addressLine = formatCheckoutAddressLine(session);
         const itemsLines = cartLines
           .map((line) => `  • ${line.name} x${line.quantity}`)
           .join("\n");
