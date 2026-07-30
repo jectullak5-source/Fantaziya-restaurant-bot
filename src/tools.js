@@ -12,6 +12,9 @@ import {
   parseReservationTime,
   parseGuestsCount,
   isReservationDateTimeInFuture,
+  isDateOpenForBooking,
+  isTimeWithinOpeningHours,
+  findAvailableTable,
   createReservation,
 } from "./reservations.js";
 import { PHONE_REGEX, normalizePhoneNumber } from "./utils.js";
@@ -200,22 +203,44 @@ async function handleCreateTableReservation(args, context) {
     return { success: false, message: "Bu sana/vaqt allaqachon o'tib ketgan. Boshqa vaqt tanlang." };
   }
 
+  if (!(await isDateOpenForBooking(parsedDate))) {
+    return { success: false, message: "Restoran o'sha kuni yopiq. Boshqa sana tanlang." };
+  }
+
+  if (!(await isTimeWithinOpeningHours(parsedTime))) {
+    return {
+      success: false,
+      message: "Bu vaqt restoranning ish vaqtidan tashqarida. Ish vaqti ichida vaqt tanlang.",
+    };
+  }
+
+  const table = await findAvailableTable(parsedDate, parsedTime, guestsCount);
+
+  if (!table) {
+    return {
+      success: false,
+      message: "Afsuski, shu sana va vaqtda mos bo'sh stol yo'q. Boshqa vaqt yoki sana tanlang.",
+    };
+  }
+
   const reservation = await createReservation({
     userId: context.userId,
     date: parsedDate,
     time: parsedTime,
     guestsCount,
     phoneNumber: normalizedPhone,
+    tableId: table.id,
   });
 
   return {
     success: true,
-    message: `Stol muvaffaqiyatli bron qilindi. Bron raqami: #${reservation.id}.`,
+    message: `Stol muvaffaqiyatli bron qilindi. Bron raqami: #${reservation.id}, stol: ${table.name}.`,
     reservation: {
       id: reservation.id,
       date: parsedDate,
       time: parsedTime,
       guestsCount,
+      table: table.name,
     },
   };
 }

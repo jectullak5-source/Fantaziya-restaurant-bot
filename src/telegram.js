@@ -40,6 +40,17 @@ import {
   parseReservationTime,
   parseGuestsCount,
   isReservationDateTimeInFuture,
+  isDateOpenForBooking,
+  isTimeWithinOpeningHours,
+  findAvailableTable,
+  getRestaurantSettings,
+  updateRestaurantHours,
+  toggleClosedWeekday,
+  listTables,
+  listActiveTables,
+  createTable,
+  setTableActive,
+  deleteTable,
   getReservationSession,
   startReservationSession,
   updateReservationSession,
@@ -47,6 +58,14 @@ import {
   createReservation,
   RESERVATION_STATUSES,
   updateReservationStatus,
+  WEEKDAY_NAMES,
+  getAddTableSession,
+  startAddTableSession,
+  updateAddTableSession,
+  endAddTableSession,
+  getScheduleSession,
+  startScheduleSession,
+  endScheduleSession,
 } from "./reservations.js";
 import { processUserMessage, processVoiceMessage } from "./brain.js";
 import {
@@ -637,6 +656,16 @@ async function handleReservationDateStep(chatId, text) {
     return;
   }
 
+  if (!(await isDateOpenForBooking(date))) {
+    const settings = await getRestaurantSettings();
+    const closedNames = settings.closedWeekdays.map((day) => WEEKDAY_NAMES[day]).join(", ");
+    await bot.sendMessage(
+      chatId,
+      `Kechirasiz, restoran shu kuni yopiq (yopiq kunlar: ${closedNames || "yo'q"}). Boshqa sana kiriting.`
+    );
+    return;
+  }
+
   updateReservationSession(chatId, { date, step: "awaiting_time" });
   await bot.sendMessage(chatId, "🕐 Soat nechida? (masalan: 19:30)");
 }
@@ -655,6 +684,15 @@ async function handleReservationTimeStep(chatId, text) {
     return;
   }
 
+  if (!(await isTimeWithinOpeningHours(time))) {
+    const settings = await getRestaurantSettings();
+    await bot.sendMessage(
+      chatId,
+      `Bu vaqt ish vaqtidan tashqarida. Ish vaqti: ${settings.openingTime}–${settings.closingTime}.`
+    );
+    return;
+  }
+
   updateReservationSession(chatId, { time, step: "awaiting_guests" });
   await bot.sendMessage(chatId, "👥 Necha kishi uchun stol kerak? (1-20)");
 }
@@ -667,14 +705,35 @@ async function handleReservationGuestsStep(chatId, text) {
     return;
   }
 
-  updateReservationSession(chatId, { guestsCount, step: "awaiting_phone" });
-  await bot.sendMessage(chatId, "📞 Telefon raqamingizni yuboring:", {
-    reply_markup: {
-      keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]],
-      resize_keyboard: true,
-      one_time_keyboard: true,
-    },
+  const session = getReservationSession(chatId);
+  const table = await findAvailableTable(session.date, session.time, guestsCount);
+
+  if (!table) {
+    await bot.sendMessage(
+      chatId,
+      "Afsuski, shu sana va vaqtda mos bo'sh stol yo'q. Iltimos, /book buyrug'i bilan boshqa vaqt yoki sana tanlang."
+    );
+    endReservationSession(chatId);
+    return;
+  }
+
+  updateReservationSession(chatId, {
+    guestsCount,
+    tableId: table.id,
+    tableName: table.name,
+    step: "awaiting_phone",
   });
+  await bot.sendMessage(
+    chatId,
+    `✅ "${table.name}" stoli mos keladi (${table.capacity} kishilik).\n\n📞 Telefon raqamingizni yuboring:`,
+    {
+      reply_markup: {
+        keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    }
+  );
 }
 
 async function handleReservationPhoneStep(chatId, message) {
@@ -703,6 +762,7 @@ async function handleReservationPhoneStep(chatId, message) {
       `📅 Sana: ${session.date}\n` +
       `🕐 Vaqt: ${session.time}\n` +
       `👥 Kishi: ${session.guestsCount}\n` +
+      `🪑 Stol: ${sanitizeForMarkdown(session.tableName)}\n` +
       `📞 Telefon: ${phoneNumber}`,
     {
       parse_mode: "Markdown",
@@ -758,6 +818,7 @@ function buildAdminMainMenuKeyboard() {
     inline_keyboard: [
       [{ text: "📦 Buyurtmalar", callback_data: "admin:orders" }],
       [{ text: "🪑 Bronlar", callback_data: "admin:reservations" }],
+      [{ text: "🕐 Ish vaqti va stollar", callback_data: "admin:schedule" }],
       [{ text: "📊 Statistika", callback_data: "admin:stats" }],
       [{ text: "🍽 Menyu boshqaruvi", callback_data: "admin:menuadmin" }],
     ],
@@ -932,6 +993,193 @@ async function applyReservationStatus(chatId, messageId, reservationId, status) 
       },
     }
   );
+}
+
+async function showAdminSchedule(chatId, messageId) {
+  const settings = await getRestaurantSettings();
+  const closedNames = settings.closedWeekdays.map((day) => WEEKDAY_NAMES[day]).join(", ") || "yo'q";
+
+  await bot.editMessageText(
+    `🕐 *Ish vaqti va stollar*\n\n` +
+      `Ish vaqti: ${settings.openingTime}–${settings.closingTime}\n` +
+      `Yopiq kunlar: ${closedNames}`,
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🕐 Ish vaqtini o'zgartirish", callback_data: "admin:sethours" }],
+          [{ text: "📅 Yopiq kunlarni boshqarish", callback_data: "admin:closeddays" }],
+          [{ text: "🪑 Stollarni boshqarish", callback_data: "admin:tables" }],
+          [{ text: "⬅️ Orqaga", callback_data: "admin:menu" }],
+        ],
+      },
+    }
+  );
+}
+
+async function startAdminSetHours(chatId, messageId) {
+  startScheduleSession(chatId);
+
+  await bot.editMessageText(
+    "Yangi ish vaqtini kiriting (format: 09:00-22:00):",
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [[{ text: "⬅️ Bekor qilish", callback_data: "admin:schedule" }]],
+      },
+    }
+  );
+}
+
+async function handleAdminHoursInput(chatId, text) {
+  const match = text.trim().match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+
+  if (!match) {
+    await bot.sendMessage(chatId, "Format noto'g'ri. Masalan: 09:00-22:00");
+    return;
+  }
+
+  const openingTime = parseReservationTime(match[1]);
+  const closingTime = parseReservationTime(match[2]);
+
+  if (!openingTime || !closingTime) {
+    await bot.sendMessage(chatId, "Vaqt formati noto'g'ri. Masalan: 09:00-22:00");
+    return;
+  }
+
+  await updateRestaurantHours(openingTime, closingTime);
+  endScheduleSession(chatId);
+  await bot.sendMessage(chatId, `✅ Ish vaqti yangilandi: ${openingTime}–${closingTime}`);
+}
+
+async function showAdminClosedDays(chatId, messageId) {
+  const settings = await getRestaurantSettings();
+
+  const dayButtons = Object.entries(WEEKDAY_NAMES).map(([dayNumber, name]) => {
+    const day = Number(dayNumber);
+    const isClosed = settings.closedWeekdays.includes(day);
+    return [
+      { text: `${isClosed ? "🔴" : "🟢"} ${name}`, callback_data: `admin:toggleday:${day}` },
+    ];
+  });
+
+  await bot.editMessageText(
+    "📅 Kunni bosib, ochiq/yopiq holatini almashtiring (🟢 ochiq, 🔴 yopiq):",
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          ...dayButtons,
+          [{ text: "⬅️ Orqaga", callback_data: "admin:schedule" }],
+        ],
+      },
+    }
+  );
+}
+
+async function toggleAdminClosedDay(chatId, messageId, day) {
+  await toggleClosedWeekday(day);
+  await showAdminClosedDays(chatId, messageId);
+}
+
+async function showAdminTables(chatId, messageId) {
+  const tables = await listTables();
+
+  if (tables.length === 0) {
+    await bot.editMessageText("🪑 Hozircha stollar qo'shilmagan.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➕ Yangi stol qo'shish", callback_data: "admin:addtable" }],
+          [{ text: "⬅️ Orqaga", callback_data: "admin:schedule" }],
+        ],
+      },
+    });
+    return;
+  }
+
+  const tableRows = tables.map((table) => [
+    {
+      text: `${table.is_active ? "✅" : "🚫"} ${table.name} (${table.capacity} kishi)`,
+      callback_data: `admin:toggletable:${table.id}`,
+    },
+    { text: "🗑", callback_data: `admin:deletetable:${table.id}` },
+  ]);
+
+  await bot.editMessageText("🪑 *Stollar:*\n\nNomni bosish — yoqish/yashirish, 🗑 — o'chirish.", {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        ...tableRows,
+        [{ text: "➕ Yangi stol qo'shish", callback_data: "admin:addtable" }],
+        [{ text: "⬅️ Orqaga", callback_data: "admin:schedule" }],
+      ],
+    },
+  });
+}
+
+async function startAdminAddTable(chatId, messageId) {
+  startAddTableSession(chatId);
+
+  await bot.editMessageText("Stol nomini kiriting (masalan: '1-stol'):", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [[{ text: "⬅️ Bekor qilish", callback_data: "admin:tables" }]],
+    },
+  });
+}
+
+async function handleAdminAddTableName(chatId, text) {
+  if (!text.trim()) {
+    await bot.sendMessage(chatId, "Iltimos, stol nomini kiriting.");
+    return;
+  }
+
+  updateAddTableSession(chatId, { name: text.trim(), step: "awaiting_capacity" });
+  await bot.sendMessage(chatId, "Necha kishilik? (son kiriting, masalan: 4)");
+}
+
+async function handleAdminAddTableCapacity(chatId, text) {
+  const capacity = Number(text.trim());
+
+  if (!Number.isInteger(capacity) || capacity <= 0 || capacity > 50) {
+    await bot.sendMessage(chatId, "Noto'g'ri son. 1 dan 50 gacha butun son kiriting.");
+    return;
+  }
+
+  const session = getAddTableSession(chatId);
+  const table = await createTable(session.name, capacity);
+  endAddTableSession(chatId);
+
+  await bot.sendMessage(
+    chatId,
+    `✅ Yangi stol qo'shildi: ${sanitizeForMarkdown(table.name)} (${table.capacity} kishilik)`
+  );
+}
+
+async function toggleAdminTableActive(chatId, messageId, tableId) {
+  const tables = await listTables();
+  const table = tables.find((existingTable) => existingTable.id === tableId);
+
+  if (!table) {
+    return;
+  }
+
+  await setTableActive(tableId, !table.is_active);
+  await showAdminTables(chatId, messageId);
+}
+
+async function deleteAdminTable(chatId, messageId, tableId) {
+  await deleteTable(tableId);
+  await showAdminTables(chatId, messageId);
 }
 
 async function showAdminStats(chatId, messageId) {
@@ -1167,6 +1415,50 @@ function registerAdminMenuFlow() {
   });
 }
 
+function registerAdminScheduleFlow() {
+  bot.on("message", async (message) => {
+    const chatId = message.chat.id;
+    const session = getScheduleSession(chatId);
+
+    if (!session || message.text?.startsWith("/")) {
+      return;
+    }
+
+    try {
+      if (session.step === "awaiting_hours") {
+        await handleAdminHoursInput(chatId, message.text ?? "");
+      }
+    } catch (error) {
+      console.error("Ish vaqtini o'zgartirishda xatolik:", error.message);
+      await bot.sendMessage(chatId, "Xatolik yuz berdi. Qaytadan urinib ko'ring.");
+      endScheduleSession(chatId);
+    }
+  });
+}
+
+function registerAdminTableFlow() {
+  bot.on("message", async (message) => {
+    const chatId = message.chat.id;
+    const session = getAddTableSession(chatId);
+
+    if (!session || message.text?.startsWith("/")) {
+      return;
+    }
+
+    try {
+      if (session.step === "awaiting_name") {
+        await handleAdminAddTableName(chatId, message.text ?? "");
+      } else if (session.step === "awaiting_capacity") {
+        await handleAdminAddTableCapacity(chatId, message.text ?? "");
+      }
+    } catch (error) {
+      console.error("Stol qo'shishda xatolik:", error.message);
+      await bot.sendMessage(chatId, "Xatolik yuz berdi. Qaytadan boshlang.");
+      endAddTableSession(chatId);
+    }
+  });
+}
+
 function registerAdminCallbacks() {
   bot.on("callback_query", async (callbackQuery) => {
     const data = callbackQuery.data;
@@ -1217,6 +1509,22 @@ function registerAdminCallbacks() {
         await toggleAdminItemAvailability(chatId, messageId, Number(rest[0]), Number(rest[1]));
       } else if (action === "deleteitem") {
         await deleteAdminItem(chatId, messageId, Number(rest[0]), Number(rest[1]));
+      } else if (action === "schedule") {
+        await showAdminSchedule(chatId, messageId);
+      } else if (action === "sethours") {
+        await startAdminSetHours(chatId, messageId);
+      } else if (action === "closeddays") {
+        await showAdminClosedDays(chatId, messageId);
+      } else if (action === "toggleday") {
+        await toggleAdminClosedDay(chatId, messageId, Number(rest[0]));
+      } else if (action === "tables") {
+        await showAdminTables(chatId, messageId);
+      } else if (action === "addtable") {
+        await startAdminAddTable(chatId, messageId);
+      } else if (action === "toggletable") {
+        await toggleAdminTableActive(chatId, messageId, Number(rest[0]));
+      } else if (action === "deletetable") {
+        await deleteAdminTable(chatId, messageId, Number(rest[0]));
       }
 
       await bot.answerCallbackQuery(callbackQuery.id);
@@ -1244,7 +1552,13 @@ function registerAiConversationFlow() {
       return;
     }
 
-    if (getCheckoutSession(chatId) || getReservationSession(chatId) || getAddItemSession(chatId)) {
+    if (
+      getCheckoutSession(chatId) ||
+      getReservationSession(chatId) ||
+      getAddItemSession(chatId) ||
+      getScheduleSession(chatId) ||
+      getAddTableSession(chatId)
+    ) {
       return;
     }
 
@@ -1266,7 +1580,13 @@ function registerVoiceMessageFlow() {
   bot.on("voice", async (message) => {
     const chatId = message.chat.id;
 
-    if (getCheckoutSession(chatId) || getReservationSession(chatId) || getAddItemSession(chatId)) {
+    if (
+      getCheckoutSession(chatId) ||
+      getReservationSession(chatId) ||
+      getAddItemSession(chatId) ||
+      getScheduleSession(chatId) ||
+      getAddTableSession(chatId)
+    ) {
       await bot.sendMessage(
         chatId,
         "Hozir davom etayotgan jarayon bor. Iltimos, uni matn bilan yakunlang."
@@ -1450,6 +1770,7 @@ function registerMenuCallbacks() {
           time: session.time,
           guestsCount: session.guestsCount,
           phoneNumber: session.phoneNumber,
+          tableId: session.tableId,
         });
 
         endReservationSession(chatId);
@@ -1459,7 +1780,8 @@ function registerMenuCallbacks() {
           `✅ Stol bron qilindi!\n\n` +
             `Bron raqami: #${reservation.id}\n` +
             `📅 ${session.date} ${session.time}\n` +
-            `👥 ${session.guestsCount} kishi\n\n` +
+            `👥 ${session.guestsCount} kishi\n` +
+            `🪑 ${session.tableName}\n\n` +
             `Sizni kutamiz!`,
           { chat_id: chatId, message_id: messageId }
         );
@@ -1474,7 +1796,8 @@ function registerMenuCallbacks() {
             `👤 ${reservationCustomerName}\n` +
             `📞 ${session.phoneNumber}\n` +
             `📅 ${session.date} 🕐 ${session.time}\n` +
-            `👥 ${session.guestsCount} kishi`
+            `👥 ${session.guestsCount} kishi\n` +
+            `🪑 ${sanitizeForMarkdown(session.tableName)}`
         );
       } else if (data === "cancel_reservation") {
         endReservationSession(chatId);
@@ -1516,6 +1839,8 @@ export function startBot() {
   registerGroupIdCommand();
   registerAddAdminCommand();
   registerAdminMenuFlow();
+  registerAdminScheduleFlow();
+  registerAdminTableFlow();
   registerAiConversationFlow();
   registerVoiceMessageFlow();
   registerMenuCallbacks();
