@@ -8,6 +8,11 @@ import { initAdminTables } from "./admin.js";
 import { startBot } from "./telegram.js";
 
 async function bootstrap() {
+  const deployedCommit = process.env.RAILWAY_GIT_COMMIT_SHA
+    ? process.env.RAILWAY_GIT_COMMIT_SHA.slice(0, 7)
+    : "lokal (Railway emas)";
+  console.log(`Ishlab turgan kod versiyasi (git commit): ${deployedCommit}`);
+
   await initDatabase();
   await initMenuTables();
   await initOrderTables();
