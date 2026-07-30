@@ -462,36 +462,20 @@ async function handlePhoneStep(chatId, message) {
   );
 }
 
-async function handleLocationStep(chatId, message) {
-  let latitude = null;
-  let longitude = null;
-  let addressText = null;
-
-  if (message.location) {
-    latitude = message.location.latitude;
-    longitude = message.location.longitude;
-  } else if (message.text?.trim()) {
-    addressText = message.text.trim();
+function formatCheckoutAddressLine(session) {
+  if (session.latitude && session.longitude) {
+    const note = session.addressText ? ` — ${session.addressText}` : "";
+    return `${session.latitude}, ${session.longitude}${note}`;
   }
 
-  if (!latitude && !addressText) {
-    await bot.sendMessage(
-      chatId,
-      "Iltimos, lokatsiya yuboring yoki manzilingizni matn ko'rinishida yozing."
-    );
-    return;
-  }
+  return session.addressText ?? "Noma'lum";
+}
 
-  const session = updateCheckoutSession(chatId, {
-    latitude,
-    longitude,
-    addressText,
-    step: "confirming",
-  });
-
+async function sendOrderConfirmationSummary(chatId) {
+  const session = getCheckoutSession(chatId);
   const cartLines = getCart(chatId);
   const total = getCartTotal(chatId);
-  const addressLine = addressText ?? `${latitude}, ${longitude}`;
+  const addressLine = formatCheckoutAddressLine(session);
 
   const summary =
     `📋 *Buyurtmangizni tasdiqlang:*\n\n` +
@@ -516,6 +500,57 @@ async function handleLocationStep(chatId, message) {
   });
 }
 
+async function handleLocationStep(chatId, message) {
+  if (message.location) {
+    updateCheckoutSession(chatId, {
+      latitude: message.location.latitude,
+      longitude: message.location.longitude,
+      step: "awaiting_address_note",
+    });
+
+    await bot.sendMessage(
+      chatId,
+      "Qo'shimcha mo'ljal yoki izoh kiriting (masalan: ko'k darvoza, maktab yonida, N-uy). " +
+        "Kerak bo'lmasa '-' deb yozing.",
+      { reply_markup: { remove_keyboard: true } }
+    );
+    return;
+  }
+
+  if (message.text?.trim()) {
+    updateCheckoutSession(chatId, {
+      addressText: message.text.trim(),
+      step: "confirming",
+    });
+    await sendOrderConfirmationSummary(chatId);
+    return;
+  }
+
+  await bot.sendMessage(
+    chatId,
+    "Iltimos, lokatsiya yuboring yoki manzilingizni matn ko'rinishida yozing."
+  );
+}
+
+async function handleAddressNoteStep(chatId, message) {
+  const text = message.text?.trim();
+
+  if (!text) {
+    await bot.sendMessage(
+      chatId,
+      "Iltimos, matn ko'rinishida yozing (yoki kerak bo'lmasa '-' deb yozing)."
+    );
+    return;
+  }
+
+  updateCheckoutSession(chatId, {
+    addressText: text === "-" ? null : text,
+    step: "confirming",
+  });
+
+  await sendOrderConfirmationSummary(chatId);
+}
+
 function registerCheckoutFlow() {
   bot.on("message", async (message) => {
     const chatId = message.chat.id;
@@ -530,6 +565,8 @@ function registerCheckoutFlow() {
         await handlePhoneStep(chatId, message);
       } else if (session.step === "awaiting_location") {
         await handleLocationStep(chatId, message);
+      } else if (session.step === "awaiting_address_note") {
+        await handleAddressNoteStep(chatId, message);
       } else if (session.step === "confirming") {
         await bot.sendMessage(
           chatId,
