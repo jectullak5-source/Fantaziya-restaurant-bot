@@ -13,7 +13,13 @@ import {
   setMenuItemAvailability,
   deleteMenuItem,
 } from "./menu.js";
-import { formatPrice, PHONE_REGEX, normalizePhoneNumber, buildGoogleMapsLink } from "./utils.js";
+import {
+  formatPrice,
+  PHONE_REGEX,
+  normalizePhoneNumber,
+  buildGoogleMapsLink,
+  sanitizeForMarkdown,
+} from "./utils.js";
 import {
   getCart,
   addItemToCart,
@@ -109,14 +115,17 @@ const RESTAURANT_ADDRESS = {
   mapsUrl: "https://maps.app.goo.gl/qN4rYxeo3KgRowsq9?g_st=ic",
 };
 
-async function notifyOrdersGroup(text) {
+async function notifyOrdersGroup(text, replyMarkup) {
   if (!config.ordersGroupChatId) {
     console.log("Guruh bildirishnomasi o'tkazib yuborildi: ORDERS_GROUP_CHAT_ID sozlanmagan.");
     return;
   }
 
   try {
-    await bot.sendMessage(config.ordersGroupChatId, text, { parse_mode: "Markdown" });
+    await bot.sendMessage(config.ordersGroupChatId, text, {
+      parse_mode: "Markdown",
+      reply_markup: replyMarkup,
+    });
     console.log(`Guruhga bildirishnoma yuborildi (chat_id: ${config.ordersGroupChatId}).`);
   } catch (error) {
     console.error(
@@ -206,9 +215,9 @@ function formatCartText(cartLines, total) {
   const lines = cartLines
     .map(
       (line, index) =>
-        `${index + 1}. ${line.name} — ${line.quantity} x ${formatPrice(line.price)} = ${formatPrice(
-          line.price * line.quantity
-        )}`
+        `${index + 1}. ${sanitizeForMarkdown(line.name)} — ${line.quantity} x ${formatPrice(
+          line.price
+        )} = ${formatPrice(line.price * line.quantity)}`
     )
     .join("\n");
 
@@ -464,12 +473,12 @@ async function handlePhoneStep(chatId, message) {
 
 function formatCheckoutAddressLine(session) {
   if (session.latitude && session.longitude) {
-    const note = session.addressText ? ` — ${session.addressText}` : "";
-    const mapsLink = buildGoogleMapsLink(session.latitude, session.longitude);
-    return `[🗺 Google Maps'da ko'rish](${mapsLink})${note}`;
+    return session.addressText
+      ? sanitizeForMarkdown(session.addressText)
+      : "GPS orqali yuborilgan (pastdagi tugmani bosing)";
   }
 
-  return session.addressText ?? "Noma'lum";
+  return session.addressText ? sanitizeForMarkdown(session.addressText) : "Noma'lum";
 }
 
 async function sendOrderConfirmationSummary(chatId) {
@@ -489,15 +498,23 @@ async function sendOrderConfirmationSummary(chatId) {
     reply_markup: { remove_keyboard: true },
   });
 
+  const confirmButtons = [
+    { text: "✅ Tasdiqlash", callback_data: "confirm_order" },
+    { text: "❌ Bekor qilish", callback_data: "cancel_order" },
+  ];
+  const inlineKeyboard = [confirmButtons];
+
+  if (session.latitude && session.longitude) {
+    inlineKeyboard.unshift([
+      {
+        text: "🗺 Manzilni xaritada ko'rish",
+        url: buildGoogleMapsLink(session.latitude, session.longitude),
+      },
+    ]);
+  }
+
   await bot.sendMessage(chatId, "Buyurtmani tasdiqlaysizmi?", {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Tasdiqlash", callback_data: "confirm_order" },
-          { text: "❌ Bekor qilish", callback_data: "cancel_order" },
-        ],
-      ],
-    },
+    reply_markup: { inline_keyboard: inlineKeyboard },
   });
 }
 
@@ -770,7 +787,7 @@ async function showAdminOrders(chatId, messageId) {
 
   const lines = orders
     .map((order) => {
-      const customer = order.first_name || order.username || "Noma'lum";
+      const customer = sanitizeForMarkdown(order.first_name || order.username || "Noma'lum");
       const status = ORDER_STATUS_LABELS[order.status] ?? order.status;
       return `#${order.id} — ${customer} — ${formatPrice(order.total_price)} — ${status}`;
     })
@@ -842,7 +859,9 @@ async function showAdminReservations(chatId, messageId) {
 
   const lines = reservations
     .map((reservation) => {
-      const customer = reservation.first_name || reservation.username || "Noma'lum";
+      const customer = sanitizeForMarkdown(
+        reservation.first_name || reservation.username || "Noma'lum"
+      );
       const status = RESERVATION_STATUS_LABELS[reservation.status] ?? reservation.status;
       const date = dayjs(reservation.reservation_date).format("DD.MM.YYYY");
       const time = reservation.reservation_time.slice(0, 5);
@@ -1369,11 +1388,27 @@ function registerMenuCallbacks() {
           { chat_id: chatId, message_id: messageId }
         );
 
-        const customerName = user.first_name || user.username || "Noma'lum";
+        const customerName = sanitizeForMarkdown(
+          user.first_name || user.username || "Noma'lum"
+        );
         const addressLine = formatCheckoutAddressLine(session);
         const itemsLines = cartLines
-          .map((line) => `  • ${line.name} x${line.quantity}`)
+          .map((line) => `  • ${sanitizeForMarkdown(line.name)} x${line.quantity}`)
           .join("\n");
+
+        const groupReplyMarkup =
+          session.latitude && session.longitude
+            ? {
+                inline_keyboard: [
+                  [
+                    {
+                      text: "🗺 Manzilni xaritada ko'rish",
+                      url: buildGoogleMapsLink(session.latitude, session.longitude),
+                    },
+                  ],
+                ],
+              }
+            : undefined;
 
         await notifyOrdersGroup(
           `🆕 *Yangi buyurtma!*\n\n` +
@@ -1382,7 +1417,8 @@ function registerMenuCallbacks() {
             `📞 ${session.phoneNumber}\n` +
             `📍 ${addressLine}\n\n` +
             `${itemsLines}\n\n` +
-            `💰 Jami: ${formatPrice(order.total_price)}`
+            `💰 Jami: ${formatPrice(order.total_price)}`,
+          groupReplyMarkup
         );
       } else if (data === "cancel_order") {
         endCheckout(chatId);
@@ -1428,7 +1464,9 @@ function registerMenuCallbacks() {
           { chat_id: chatId, message_id: messageId }
         );
 
-        const reservationCustomerName = user.first_name || user.username || "Noma'lum";
+        const reservationCustomerName = sanitizeForMarkdown(
+          user.first_name || user.username || "Noma'lum"
+        );
 
         await notifyOrdersGroup(
           `🆕 *Yangi bron!*\n\n` +

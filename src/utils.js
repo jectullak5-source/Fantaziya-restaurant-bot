@@ -14,3 +14,7 @@ export function normalizePhoneNumber(rawPhone) {
 export function buildGoogleMapsLink(latitude, longitude) {
   return `https://www.google.com/maps?q=${latitude},${longitude}`;
 }
+
+export function sanitizeForMarkdown(text) {
+  return String(text).replace(/[_*`[\]]/g, "");
+}
