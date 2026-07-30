@@ -17,7 +17,7 @@ import {
   findAvailableTable,
   createReservation,
 } from "./reservations.js";
-import { PHONE_REGEX, normalizePhoneNumber } from "./utils.js";
+import { PHONE_REGEX, normalizePhoneNumber, sanitizeForMarkdown } from "./utils.js";
 
 export const toolDeclarations = [
   {
@@ -231,6 +231,18 @@ async function handleCreateTableReservation(args, context) {
     phoneNumber: normalizedPhone,
     tableId: table.id,
   });
+
+  if (typeof context.notifyGroup === "function") {
+    await context.notifyGroup(
+      `🆕 *Yangi bron! (AI orqali)*\n\n` +
+        `#${reservation.id}\n` +
+        `👤 ${context.customerName ?? "Noma'lum"}\n` +
+        `📞 ${normalizedPhone}\n` +
+        `📅 ${parsedDate} 🕐 ${parsedTime}\n` +
+        `👥 ${guestsCount} kishi\n` +
+        `🪑 ${sanitizeForMarkdown(table.name)}`
+    );
+  }
 
   return {
     success: true,

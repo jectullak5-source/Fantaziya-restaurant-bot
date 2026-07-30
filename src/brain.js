@@ -1,6 +1,7 @@
 import { upsertUser } from "./database.js";
 import { runConversation } from "./ai.js";
 import { toolDeclarations, toolHandlers } from "./tools.js";
+import { sanitizeForMarkdown } from "./utils.js";
 
 const MAX_HISTORY_MESSAGES = 20;
 
@@ -32,8 +33,9 @@ function saveHistory(chatId, contents) {
   conversations.set(chatId, contents.slice(-MAX_HISTORY_MESSAGES));
 }
 
-async function runTurn(chatId, telegramFrom, parts, fallbackMessage) {
+async function runTurn(chatId, telegramFrom, parts, fallbackMessage, notifyGroup) {
   const user = await upsertUser(telegramFrom);
+  const customerName = sanitizeForMarkdown(user.first_name || user.username || "Noma'lum");
 
   const history = getHistory(chatId);
   const contents = [...history, { role: "user", parts }];
@@ -42,7 +44,7 @@ async function runTurn(chatId, telegramFrom, parts, fallbackMessage) {
     contents,
     toolDeclarations,
     toolHandlers,
-    context: { chatId, userId: user.id },
+    context: { chatId, userId: user.id, customerName, notifyGroup },
     systemInstruction: SYSTEM_INSTRUCTION,
   });
 
@@ -51,23 +53,25 @@ async function runTurn(chatId, telegramFrom, parts, fallbackMessage) {
   return replyText || fallbackMessage;
 }
 
-export async function processUserMessage(chatId, text, telegramFrom) {
+export async function processUserMessage(chatId, text, telegramFrom, notifyGroup) {
   return runTurn(
     chatId,
     telegramFrom,
     [{ text }],
-    "Kechirasiz, javob shakllantira olmadim. Qaytadan urinib ko'ring."
+    "Kechirasiz, javob shakllantira olmadim. Qaytadan urinib ko'ring.",
+    notifyGroup
   );
 }
 
-export async function processVoiceMessage(chatId, audioBuffer, mimeType, telegramFrom) {
+export async function processVoiceMessage(chatId, audioBuffer, mimeType, telegramFrom, notifyGroup) {
   const audioPart = { inlineData: { mimeType, data: audioBuffer.toString("base64") } };
 
   return runTurn(
     chatId,
     telegramFrom,
     [audioPart],
-    "Kechirasiz, ovozli xabaringizni tushuna olmadim. Qaytadan urinib ko'ring yoki matn yozing."
+    "Kechirasiz, ovozli xabaringizni tushuna olmadim. Qaytadan urinib ko'ring yoki matn yozing.",
+    notifyGroup
   );
 }
 

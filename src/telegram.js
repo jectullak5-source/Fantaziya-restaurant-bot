@@ -1564,7 +1564,7 @@ function registerAiConversationFlow() {
 
     try {
       await bot.sendChatAction(chatId, "typing");
-      const reply = await processUserMessage(chatId, text, message.from);
+      const reply = await processUserMessage(chatId, text, message.from, notifyOrdersGroup);
       await bot.sendMessage(chatId, reply);
     } catch (error) {
       console.error("AI suhbatida xatolik:", error.message);
@@ -1602,7 +1602,13 @@ function registerVoiceMessageFlow() {
       const audioBuffer = Buffer.from(response.data);
       const mimeType = message.voice.mime_type || "audio/ogg";
 
-      const reply = await processVoiceMessage(chatId, audioBuffer, mimeType, message.from);
+      const reply = await processVoiceMessage(
+        chatId,
+        audioBuffer,
+        mimeType,
+        message.from,
+        notifyOrdersGroup
+      );
       await bot.sendMessage(chatId, reply);
     } catch (error) {
       console.error("Ovozli xabarni qayta ishlashda xatolik:", error.message);
